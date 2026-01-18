@@ -1,0 +1,64 @@
+import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
+
+const BACKEND_URL = process.env.BACKEND_URL!;
+
+export async function GET(req: NextRequest) {
+    return forward(req, `/auth/sessions?${req.nextUrl.searchParams.toString()}`);
+}
+export async function POST(req: NextRequest) {
+    return forward(req, `/auth/logout-all`, true);
+}
+export async function PUT(req: NextRequest) {
+    return forward(req, `/auth/revoke/${req.nextUrl.searchParams.get('sessionId')}`, true);
+}
+
+async function forward(
+    req: NextRequest,
+    endpoint: string,
+    hasBody = false
+) {
+    const cookieStore = await cookies();
+
+    const accessCookie = cookieStore.get("access_token");
+    if (!accessCookie) {
+        return NextResponse.json(
+            { message: "Unauthorized" },
+            { status: 401 }
+        );
+    }
+
+    const headers: HeadersInit = {
+        "Content-Type": "application/json",
+        Cookie: `${accessCookie.name}=${accessCookie.value};`,
+    };
+
+    // forward refresh token cookie for logout requests
+    // if (req.url.includes('logout')) {
+    //     const refreshCookie = cookieStore.get("refresh_token");
+    //     if (refreshCookie) {
+    //         headers["Cookie"] += ` ${refreshCookie.name}=${refreshCookie.value};`;
+    //     }
+    // }
+
+    let body = hasBody ? await req.text() : undefined;
+    const backendRes = await fetch(`${BACKEND_URL}${endpoint}`, {
+        method: req.method,
+        headers,
+        body,
+        credentials: "include",
+    });
+
+    // forward refreshed cookies if backend sets them
+    const response = NextResponse.json(
+        await backendRes.json(),
+        { status: backendRes.status }
+    );
+
+    const setCookie = backendRes.headers.get("set-cookie");
+    if (setCookie) {
+        response.headers.set("set-cookie", setCookie);
+    }
+
+    return response;
+}

@@ -1,0 +1,259 @@
+"use client";
+
+import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import {
+    Card,
+    CardAction,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+} from "@/components/ui/card";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+    Select,
+    SelectContent,
+    SelectGroup,
+    SelectItem,
+    SelectLabel,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { format } from "date-fns";
+import { ChevronDownIcon, Plus, PlusIcon, Trash } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useForm } from "react-hook-form";
+import { toast } from "sonner";
+import * as z from "zod";
+import { adminTasksService } from "../admin-task.service";
+import { useAdminTasksStore } from "../admin-tasks.store";
+import { UserSearchSelect } from "./UserSearchSelect";
+
+// --- Zod schema ---
+const taskSchema = z.object({
+    userId: z.string().min(1, "User is required"),
+    title: z.string().min(1, "Title is required"),
+    description: z.string().optional(),
+    priority: z.enum(["LOW", "MEDIUM", "HIGH"], { message: "Priority is required" }),
+    status: z.enum(["TODO", "IN_PROGRESS", "DONE"], { message: "Status is required" }),
+    date: z.date().optional(),
+    time: z.string().optional(),
+});
+
+type TaskFormData = z.infer<typeof taskSchema>;
+
+export default function AdminCreateTask({ taskId }: { taskId?: string; }) {
+    const { tasks, addTask, removeTask } = useAdminTasksStore();
+    const [newTaskDate, setNewTaskDate] = useState<Date | undefined>();
+    const [newTaskTime, setNewTaskTime] = useState<string>("");
+    const [open, setOpen] = useState(false);
+    const router = useRouter();
+    const {
+        register,
+        handleSubmit,
+        setValue,
+        watch,
+        formState: { errors, isSubmitting },
+        reset,
+    } = useForm<TaskFormData>({
+        resolver: zodResolver(taskSchema),
+        defaultValues: {
+            title: "",
+            description: "",
+            priority: "MEDIUM",
+            status: "TODO",
+            userId: ""
+        }
+    });
+    const priority = watch("priority");
+    const status = watch("status");
+
+    const onSubmit = async (data: TaskFormData) => {
+        try {
+            const finalData = {
+                ...data,
+                priority,
+                status,
+                date: newTaskDate,
+                time: newTaskTime || undefined,
+            };
+
+            const task = await adminTasksService.create(finalData);
+            addTask(task);
+            reset();
+            toast.success("Task created successfully");
+            // Reset form
+            setNewTaskDate(undefined);
+            setNewTaskTime("");
+
+            router.push('/admin/tasks');
+        } catch (err: any) {
+            toast.error(err.message);
+        }
+    };
+
+    const handleCreate = async () => {
+        router.push(`/admin/tasks/create`);
+    };
+
+    const handleDelete = async (id: string) => {
+        try {
+            await adminTasksService.remove(id);
+            removeTask(id);
+        } catch (err: any) {
+            toast.error(err.message);
+        }
+    };
+
+    useEffect(() => {
+        if (!taskId) return;
+        adminTasksService.get(taskId)
+            .then((task) => {
+                setValue("userId", task.userId);
+                setValue("title", task.title);
+                setValue("description", task.description || "");
+                setValue("priority", task.priority);
+                setValue("status", task.status);
+                if (task.date) setNewTaskDate(new Date(task.date));
+                if (task.time) setNewTaskTime(task.time);
+            })
+            .catch((err: any) => {
+                toast.error(err.message);
+            });
+    }, [taskId, tasks, setValue]);
+
+    return (
+        <form onSubmit={handleSubmit(onSubmit)}>
+            <Card className="max-w-2xl mx-auto">
+                <CardHeader>
+                    <CardTitle>Create New Task</CardTitle>
+                    <CardDescription>Use the form below to create a new task.</CardDescription>
+                    <CardAction>
+                        <Button variant={"default"} type="button" onClick={handleCreate}><PlusIcon /> Create New Task</Button>
+                    </CardAction>
+                </CardHeader>
+                <CardContent className="grid gap-4">
+                    {/* User */}
+                    <Label htmlFor="task-user">User</Label>
+                    <UserSearchSelect value={watch("userId")} onChange={(userId) => setValue("userId", userId, { shouldValidate: true })} />
+                    {errors.userId && <p className="text-red-500 text-sm">{errors.userId.message}</p>}
+
+                    {/* Title */}
+                    <Label htmlFor="task-title">Title</Label>
+                    <Input id="task-title" placeholder="Title of the task" {...register("title")} />
+                    {errors.title && <p className="text-red-500 text-sm">{errors.title.message}</p>}
+
+                    {/* Description */}
+                    <Label htmlFor="task-description">Description</Label>
+                    <Textarea
+                        id="task-description"
+                        placeholder="Note about the task"
+                        {...register("description")}
+                        rows={4}
+                    />
+                    {errors.description && <p className="text-red-500 text-sm">{errors.description.message}</p>}
+
+                    {/* Priority */}
+                    <Label htmlFor="task-priority">Priority</Label>
+                    <small>The priority of the task indicates importance.</small>
+                    <Select value={priority}
+                        onValueChange={(value) => setValue("priority", value as any, { shouldValidate: true })}
+                    >
+                        <SelectTrigger className="w-full max-w-48">
+                            <SelectValue placeholder="Select a priority" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectGroup>
+                                <SelectLabel>Task Priority</SelectLabel>
+                                <SelectItem value="LOW">Low</SelectItem>
+                                <SelectItem value="MEDIUM">Medium</SelectItem>
+                                <SelectItem value="HIGH">High</SelectItem>
+                            </SelectGroup>
+                        </SelectContent>
+                    </Select>
+                    {errors.priority && <p className="text-red-500 text-sm">{errors.priority.message}</p>}
+
+                    {/* Status */}
+                    <Label htmlFor="task-status">Status</Label>
+                    <Select value={status}
+                        onValueChange={(value) => setValue("status", value as any, { shouldValidate: true })}
+                    >
+                        <SelectTrigger className="w-full max-w-48">
+                            <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectGroup>
+                                <SelectLabel>Task Status</SelectLabel>
+                                <SelectItem value="TODO">To Do</SelectItem>
+                                <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
+                                <SelectItem value="DONE">Done</SelectItem>
+                            </SelectGroup>
+                        </SelectContent>
+                    </Select>
+                    {errors.status && <p className="text-red-500 text-sm">{errors.status.message}</p>}
+
+                    {/* Date & Time */}
+                    <FieldGroup className="max-w-xs flex-row">
+                        <Field>
+                            <FieldLabel htmlFor="date-picker-optional">Due Date</FieldLabel>
+                            <Popover open={open} onOpenChange={setOpen}>
+                                <PopoverTrigger asChild>
+                                    <Button
+                                        variant="outline"
+                                        id="date-picker-optional"
+                                        className="w-32 justify-between font-normal"
+                                    >
+                                        {newTaskDate ? format(newTaskDate, "PPP") : "Select date"}
+                                        <ChevronDownIcon />
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+                                    <Calendar
+                                        mode="single"
+                                        selected={newTaskDate}
+                                        captionLayout="dropdown"
+                                        defaultMonth={newTaskDate}
+                                        onSelect={(date) => {
+                                            setNewTaskDate(date);
+                                            setOpen(false);
+                                        }}
+                                    />
+                                </PopoverContent>
+                            </Popover>
+                        </Field>
+
+                        <Field className="w-32">
+                            <FieldLabel htmlFor="time-picker-optional">Due Time</FieldLabel>
+                            <Input
+                                type="time"
+                                id="time-picker-optional"
+                                step="1"
+                                className="bg-background appearance-none [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+                                value={newTaskTime}
+                                onChange={(e) => setNewTaskTime(e.target.value)}
+                            />
+                        </Field>
+                    </FieldGroup>
+
+                    <div className="flex gap-2">
+                        <Button disabled={isSubmitting} type="submit">
+                            <Plus /> {isSubmitting ? 'Adding...' : 'Add'}
+                        </Button>
+                        {taskId &&
+                            <Button variant="destructive" onClick={() => handleDelete(taskId)}>
+                                <Trash /> Delete
+                            </Button>
+                        }
+                    </div>
+                </CardContent>
+            </Card>
+        </form>
+    );
+};

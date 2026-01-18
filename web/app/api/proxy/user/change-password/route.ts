@@ -1,0 +1,43 @@
+import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
+
+const BACKEND_URL = process.env.BACKEND_URL!;
+
+export async function PUT(req: NextRequest) {
+    const cookieStore = await cookies();
+
+    const accessCookie = cookieStore.get("access_token");
+    if (!accessCookie) {
+        return NextResponse.json(
+            { message: "Unauthorized" },
+            { status: 401 }
+        );
+    }
+
+    const headers: HeadersInit = {
+        "Content-Type": "application/json",
+        Cookie: `${accessCookie.name}=${accessCookie.value}`,
+    };
+
+    const body = await req.text(); // JSON string
+
+    const backendRes = await fetch(`${BACKEND_URL}/user/change-password`, {
+        method: "PUT",
+        headers,
+        body,
+        credentials: "include",
+    });
+
+    // forward refreshed cookies if backend sets them
+    const response = NextResponse.json(
+        await backendRes.json(),
+        { status: backendRes.status }
+    );
+
+    const setCookie = backendRes.headers.get("set-cookie");
+    if (setCookie) {
+        response.headers.set("set-cookie", setCookie);
+    }
+
+    return response;
+}
